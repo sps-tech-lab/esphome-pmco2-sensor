@@ -1,0 +1,95 @@
+esphome:
+  name: "pmco2-cfg"
+  friendly_name: Air Node PMCO2
+
+esp32:
+  variant: esp32c3
+  board: esp32-c3-devkitm-1   # works for SuperMini
+  framework:
+    type: arduino
+
+api:
+  encryption:
+    key: !secret pmco2_key
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+ota:
+  - platform: esphome
+    password: !secret pmco2_ota_pass
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot in case wifi connection fails
+  ap:
+    ssid: "PMCO2 Fallback Hotspot"
+    password: !secret pmco2_fallback_pass
+
+# === UART-1 : Senseair S8 ===========================================
+uart:
+  - id: s8_bus
+    tx_pin: 10                # ESP TX → S8 RX  (1 kΩ series resistor)
+    rx_pin: 3                 # ESP RX ← S8 TX
+    baud_rate: 9600
+
+# === I²C bus : SPS30 + BMx280 =======================================
+i2c:
+  id: bus_a
+  sda: 1                      # GPIO1  (A1)
+  scl: 0                      # GPIO0  (A0)
+  frequency: 100kHz
+
+# === SENSORS ========================================================
+sensor:
+  # --- CO₂ (Senseair S8) --------------------------------------------
+  - platform: senseair
+    id: s8                    # ← component ID for actions
+    uart_id: s8_bus
+    update_interval: 30s
+    co2:
+      name: "CO₂ (ppm)"
+
+  # --- Particulate Matter (SPS30) -----------------------------------
+  - platform: sps30
+    id: pm_sensor             # component ID for auto-clean action
+    address: 0x69
+    update_interval: 60s
+    pm_1_0:   { name: "PM1.0 (µg/m³)" }
+    pm_2_5:   { name: "PM2.5 (µg/m³)" }
+    pm_4_0:   { name: "PM4.0 (µg/m³)" }
+    pm_10_0:  { name: "PM10 (µg/m³)" }
+    pmc_0_5:  { name: "PM0.5 Count" }
+    pmc_1_0:  { name: "PM1 Count" }
+    pmc_2_5:  { name: "PM2.5 Count" }
+    pmc_4_0:  { name: "PM4 Count" }
+    pmc_10_0: { name: "PM10 Count" }
+    pm_size:  { name: "Typical Particle Size" }
+
+  # --- Bosch BMP280 -------------------------------------------------
+  - platform: bmp280_i2c
+    i2c_id: bus_a
+    address: 0x76
+    temperature:
+      name: "Room Temperature"
+    pressure:
+      name: "Atmospheric Pressure"
+    update_interval: 60s
+
+# ===  BUTTONS  ======================================================
+button:
+  # Calibrate S8 to 400 ppm fresh air
+  - platform: template
+    name: "S8 • 400 ppm background calibration"
+    on_press:
+      - senseair.background_calibration: s8
+
+  # Manually trigger SPS30 auto-clean
+  - platform: template
+    name: "SPS30 • Manual fan clean"
+    on_press:
+      - sps30.start_fan_autoclean: pm_sensor
+
